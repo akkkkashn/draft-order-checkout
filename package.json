@@ -1,0 +1,15 @@
+{
+  "name": "lxry-draft-order-checkout",
+  "version": "1.0.0",
+  "description": "Shopify Draft Order Checkout for Custom Pricing",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel --prod"
+  },
+  "dependencies": {},
+  "devDependencies": {},
+  "keywords": ["shopify", "draft-order", "checkout"],
+  "author": "",
+  "license": "MIT"
+}
