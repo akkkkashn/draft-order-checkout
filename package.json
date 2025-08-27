@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Shopify Draft Order Checkout for Custom Pricing",
   "main": "index.js",
+  "type": "module",
   "scripts": {
     "dev": "vercel dev",
     "deploy": "vercel --prod"
