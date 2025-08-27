@@ -23,14 +23,23 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: 'Shopify access token not configured' });
     }
 
-    // Create draft order
+    // Convert customPrice to a number and ensure it's in the correct format
+    const price = parseFloat(customPrice);
+    if (isNaN(price) || price <= 0) {
+      return res.status(400).json({ error: 'Invalid custom price' });
+    }
+
+    // Create draft order with the custom price as the actual line item price
     const draftOrderData = {
       draft_order: {
         line_items: [
           {
             variant_id: variantId,
             quantity: quantity,
-            price: customPrice.toString()
+            price: price.toString(),
+            properties: {
+              "Calculated Price": customPrice.toString()
+            }
           }
         ],
         customer: customerEmail ? { email: customerEmail } : null,
