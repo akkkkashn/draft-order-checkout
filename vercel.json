@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/draft-order-checkout.js": {
+      "maxDuration": 10
+    }
+  }
+}
