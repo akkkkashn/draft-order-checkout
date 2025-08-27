@@ -1,6 +1,6 @@
 {
   "functions": {
-    "api/draft-order-checkout.js": {
+    "api/*.js": {
       "maxDuration": 10
     }
   }
