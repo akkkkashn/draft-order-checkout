@@ -1,18 +1,12 @@
 // api/draft-order-checkout.js
 
-// Required env vars in Vercel:
-// - SHOP_DOMAIN: your myshopify subdomain, e.g. "fr8wj4-xj.myshopify.com"
-// - SHOPIFY_ADMIN_TOKEN: Admin REST token with draft_orders write
-
 const SHOP_DOMAIN = process.env.SHOP_DOMAIN || process.env.SHOPIFY_DOMAIN;
 const ACCESS_TOKEN = process.env.SHOPIFY_ADMIN_TOKEN || process.env.SHOPIFY_ACCESS_TOKEN;
 const API_VERSION = '2024-01';
 
-// Locked CORS to your storefronts by default.
-// Add additional origins here if needed.
 const DEFAULT_ALLOWED_ORIGINS = [
   'https://lxryroom.com',
-  'https://www.lxryroom.com'
+  'https://www.lxryroom.com',
 ];
 
 function setCors(req, res) {
@@ -22,6 +16,7 @@ function setCors(req, res) {
   res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Max-Age', '86400');
 }
 
 function parsePrice(value) {
@@ -37,11 +32,15 @@ function toInt(value, fallback) {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   setCors(req, res);
 
-  if (req.method === 'OPTIONS') return res.status(204).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
 
   try {
     if (!SHOP_DOMAIN || !ACCESS_TOKEN) {
@@ -113,9 +112,7 @@ module.exports = async function handler(req, res) {
     }
 
     const draftOrderId = draftOrder.id;
-    const checkoutUrl =
-      draftOrder.invoice_url ||
-      `https://${SHOP_DOMAIN}/draft_orders/${draftOrderId}/checkout`;
+    const checkoutUrl = draftOrder.invoice_url || `https://${SHOP_DOMAIN}/draft_orders/${draftOrderId}/checkout`;
 
     return res.status(200).json({
       success: true,
@@ -125,9 +122,6 @@ module.exports = async function handler(req, res) {
     });
   } catch (error) {
     console.error('Draft order API error:', error);
-    return res.status(500).json({
-      error: 'Internal server error',
-      message: error?.message || 'Unknown error'
-    });
+    return res.status(500).json({ error: 'Internal server error', message: error?.message || 'Unknown error' });
   }
-};
+}
