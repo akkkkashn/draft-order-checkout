@@ -32,7 +32,7 @@ function toInt(value, fallback) {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
-// Convert incoming properties (object or array) to Admin API format: [{ name, value }]
+// Convert incoming properties (object or array) to [{ name, value }]
 function normalizeProperties(input) {
   if (!input) return [];
   if (Array.isArray(input)) {
@@ -48,6 +48,27 @@ function normalizeProperties(input) {
   return out;
 }
 
+// Optional: fetch variant and product to build a friendly title for the custom line
+async function fetchVariantTitle(variantId) {
+  if (!variantId) return null;
+  try {
+    const url = `https://${SHOP_DOMAIN}/admin/api/${API_VERSION}/variants/${variantId}.json`;
+    const resp = await fetch(url, { headers: { 'X-Shopify-Access-Token': ACCESS_TOKEN } });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const v = data?.variant;
+    if (!v) return null;
+    const productUrl = `https://${SHOP_DOMAIN}/admin/api/${API_VERSION}/products/${v.product_id}.json`;
+    const pResp = await fetch(productUrl, { headers: { 'X-Shopify-Access-Token': ACCESS_TOKEN } });
+    const p = pResp.ok ? (await pResp.json())?.product : null;
+    const productTitle = p?.title || 'Custom Item';
+    const variantTitle = v.title && v.title !== 'Default Title' ? ` – ${v.title}` : '';
+    return `${productTitle}${variantTitle}`;
+  } catch {
+    return null;
+  }
+}
+
 export default async function handler(req, res) {
   setCors(req, res);
 
@@ -60,44 +81,55 @@ export default async function handler(req, res) {
     }
 
     const {
-      variantId,
+      productId,            // optional (for reference)
+      variantId,            // optional (used to build a nice title)
       quantity = 1,
-      customPrice,
-      customerEmail,
-      note,
-      properties
+      customPrice,          // required (major units, e.g. "43250")
+      customerEmail,        // optional
+      note,                 // optional
+      properties            // optional (object or [{name,value}])
     } = req.body || {};
-
-    if (!variantId || !customPrice) {
-      return res.status(400).json({ error: 'Missing required fields: variantId, customPrice' });
-    }
 
     const priceStr = parsePrice(customPrice);
     if (!priceStr) {
-      return res.status(400).json({ error: 'Invalid custom price' });
+      return res.status(400).json({ error: 'Invalid or missing custom price' });
     }
 
     const qty = toInt(quantity, 1);
 
-    // Normalize properties and ensure Calculated Price is present
-    const propsArray = normalizeProperties(properties)
-      .filter(p => p.name.toLowerCase() !== 'calculated price');
-    propsArray.push({ name: 'Calculated Price', value: priceStr });
+    // Build properties array; include useful references
+    const propsArray = normalizeProperties(properties);
+    // Ensure Calculated Price is present
+    const noCalc = !propsArray.some(p => p.name.toLowerCase() === 'calculated price');
+    if (noCalc) propsArray.push({ name: 'Calculated Price', value: priceStr });
+    if (productId && !propsArray.some(p => p.name.toLowerCase() === 'product id')) {
+      propsArray.push({ name: 'Product ID', value: String(productId) });
+    }
+    if (variantId && !propsArray.some(p => p.name.toLowerCase() === 'variant id')) {
+      propsArray.push({ name: 'Variant ID', value: String(variantId) });
+    }
+
+    // Create a true custom line item (NO variant_id). This is what lets us set the price.
+    let title = await fetchVariantTitle(variantId);
+    if (!title) title = 'Custom Item';
 
     const draftOrderData = {
       draft_order: {
         line_items: [
           {
-            variant_id: variantId,
+            title,                 // custom item title
+            price: priceStr,       // your calculated price
             quantity: qty,
-            price: priceStr,
-            properties: propsArray
+            properties: propsArray,
+            // shipping/tax flags per your instruction:
+            requires_shipping: true,
+            taxable: false
           }
         ],
         customer: customerEmail ? { email: customerEmail } : undefined,
         note: note || undefined,
         use_customer_default_address: true,
-        // IMPORTANT: tags must be a comma-separated string (not an array)
+        // tags must be a comma-separated string
         tags: 'custom-pricing, draft-order-checkout'
       }
     };
