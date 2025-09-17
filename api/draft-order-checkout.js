@@ -32,15 +32,28 @@ function toInt(value, fallback) {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+// Convert incoming properties (object or array) to Admin API format:
+// [{ name: 'Key', value: 'Val' }, ...]
+function normalizeProperties(input) {
+  if (!input) return [];
+  if (Array.isArray(input)) {
+    return input
+      .filter(p => p && typeof p.name === 'string')
+      .map(p => ({ name: String(p.name), value: p.value == null ? '' : String(p.value) }));
+  }
+  const out = [];
+  for (const [k, v] of Object.entries(input)) {
+    if (!k) continue;
+    out.push({ name: String(k), value: v == null ? '' : String(v) });
+  }
+  return out;
+}
+
 export default async function handler(req, res) {
   setCors(req, res);
 
-  if (req.method === 'OPTIONS') {
-    return res.status(204).end();
-  }
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
+  if (req.method === 'OPTIONS') return res.status(204).end();
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
     if (!SHOP_DOMAIN || !ACCESS_TOKEN) {
@@ -67,6 +80,11 @@ export default async function handler(req, res) {
 
     const qty = toInt(quantity, 1);
 
+    // Prepare properties array and ensure Calculated Price is included/overrides any existing
+    const propsArray = normalizeProperties(properties)
+      .filter(p => p.name.toLowerCase() !== 'calculated price'.toLowerCase());
+    propsArray.push({ name: 'Calculated Price', value: priceStr });
+
     const draftOrderData = {
       draft_order: {
         line_items: [
@@ -74,10 +92,7 @@ export default async function handler(req, res) {
             variant_id: variantId,
             quantity: qty,
             price: priceStr,
-            properties: {
-              ...(properties || {}),
-              'Calculated Price': priceStr
-            }
+            properties: propsArray
           }
         ],
         customer: customerEmail ? { email: customerEmail } : undefined,
