@@ -32,8 +32,7 @@ function toInt(value, fallback) {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
-// Convert incoming properties (object or array) to Admin API format:
-// [{ name: 'Key', value: 'Val' }, ...]
+// Convert incoming properties (object or array) to Admin API format: [{ name, value }]
 function normalizeProperties(input) {
   if (!input) return [];
   if (Array.isArray(input)) {
@@ -80,9 +79,9 @@ export default async function handler(req, res) {
 
     const qty = toInt(quantity, 1);
 
-    // Prepare properties array and ensure Calculated Price is included/overrides any existing
+    // Normalize properties and ensure Calculated Price is present
     const propsArray = normalizeProperties(properties)
-      .filter(p => p.name.toLowerCase() !== 'calculated price'.toLowerCase());
+      .filter(p => p.name.toLowerCase() !== 'calculated price');
     propsArray.push({ name: 'Calculated Price', value: priceStr });
 
     const draftOrderData = {
@@ -98,7 +97,8 @@ export default async function handler(req, res) {
         customer: customerEmail ? { email: customerEmail } : undefined,
         note: note || undefined,
         use_customer_default_address: true,
-        tags: ['custom-pricing', 'draft-order-checkout']
+        // IMPORTANT: tags must be a comma-separated string (not an array)
+        tags: 'custom-pricing, draft-order-checkout'
       }
     };
 
