@@ -1,95 +1,133 @@
+// api/draft-order-checkout.js
+
+// Required env vars in Vercel:
+// - SHOP_DOMAIN: your myshopify subdomain, e.g. "fr8wj4-xj.myshopify.com"
+// - SHOPIFY_ADMIN_TOKEN: Admin REST token with draft_orders write
+
+const SHOP_DOMAIN = process.env.SHOP_DOMAIN || process.env.SHOPIFY_DOMAIN;
+const ACCESS_TOKEN = process.env.SHOPIFY_ADMIN_TOKEN || process.env.SHOPIFY_ACCESS_TOKEN;
+const API_VERSION = '2024-01';
+
+// Locked CORS to your storefronts by default.
+// Add additional origins here if needed.
+const DEFAULT_ALLOWED_ORIGINS = [
+  'https://lxryroom.com',
+  'https://www.lxryroom.com'
+];
+
+function setCors(req, res) {
+  const origin = req.headers.origin || '';
+  const allowed = DEFAULT_ALLOWED_ORIGINS.includes(origin) ? origin : DEFAULT_ALLOWED_ORIGINS[0];
+  res.setHeader('Access-Control-Allow-Origin', allowed);
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+}
+
+function parsePrice(value) {
+  if (value == null) return null;
+  const normalized = String(value).replace(/[^\d.,-]/g, '').replace(',', '.');
+  const num = Number(normalized);
+  if (!isFinite(num) || num <= 0) return null;
+  return num.toFixed(2);
+}
+
+function toInt(value, fallback) {
+  const n = parseInt(value, 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
 module.exports = async function handler(req, res) {
-  // Only allow POST requests
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
+  setCors(req, res);
+
+  if (req.method === 'OPTIONS') return res.status(204).end();
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    const { productId, variantId, quantity = 1, customPrice, customerEmail } = req.body || {};
-
-    // Validate required fields
-    if (!productId || !variantId || !customPrice) {
-      return res.status(400).json({
-        error: 'Missing required fields: productId, variantId, customPrice',
-      });
+    if (!SHOP_DOMAIN || !ACCESS_TOKEN) {
+      return res.status(500).json({ error: 'Server not configured: missing SHOP_DOMAIN or SHOPIFY_ADMIN_TOKEN' });
     }
 
-    // Shopify API configuration (use env vars in Vercel)
-    const SHOP_DOMAIN = process.env.SHOPIFY_DOMAIN || 'fr8wj4-xj.myshopify.com';
-    const ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
-    const API_VERSION = '2024-01';
+    const {
+      variantId,
+      quantity = 1,
+      customPrice,
+      customerEmail,
+      note,
+      properties
+    } = req.body || {};
 
-    if (!ACCESS_TOKEN) {
-      return res.status(500).json({ error: 'SHOPIFY_ACCESS_TOKEN not configured' });
+    if (!variantId || !customPrice) {
+      return res.status(400).json({ error: 'Missing required fields: variantId, customPrice' });
     }
 
-    // Normalize price
-    const priceNum = parseFloat(customPrice);
-    if (Number.isNaN(priceNum) || priceNum <= 0) {
+    const priceStr = parsePrice(customPrice);
+    if (!priceStr) {
       return res.status(400).json({ error: 'Invalid custom price' });
     }
 
-    // Build Draft Order payload
+    const qty = toInt(quantity, 1);
+
     const draftOrderData = {
       draft_order: {
         line_items: [
           {
             variant_id: variantId,
-            quantity: Number(quantity) || 1,
-            price: priceNum.toString(), // This sets the actual billing price
+            quantity: qty,
+            price: priceStr,
             properties: {
-              'Calculated Price': priceNum.toString(), // Optional reference
-            },
-          },
+              ...(properties || {}),
+              'Calculated Price': priceStr
+            }
+          }
         ],
         customer: customerEmail ? { email: customerEmail } : undefined,
+        note: note || undefined,
         use_customer_default_address: true,
-        tags: ['custom-pricing', 'draft-order-checkout'],
-      },
+        tags: ['custom-pricing', 'draft-order-checkout']
+      }
     };
 
-    // Create Draft Order
-    const draftOrderResponse = await fetch(
-      `https://${SHOP_DOMAIN}/admin/api/${API_VERSION}/draft_orders.json`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Shopify-Access-Token': ACCESS_TOKEN,
-        },
-        body: JSON.stringify(draftOrderData),
-      }
-    );
+    const createUrl = `https://${SHOP_DOMAIN}/admin/api/${API_VERSION}/draft_orders.json`;
+    const createResp = await fetch(createUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Shopify-Access-Token': ACCESS_TOKEN
+      },
+      body: JSON.stringify(draftOrderData)
+    });
 
-    if (!draftOrderResponse.ok) {
-      const text = await draftOrderResponse.text();
-      return res.status(draftOrderResponse.status).json({
+    if (!createResp.ok) {
+      const text = await createResp.text().catch(() => '');
+      return res.status(createResp.status).json({
         error: 'Failed to create draft order',
-        details: text,
+        details: text
       });
     }
 
-    const draftOrder = await draftOrderResponse.json();
-    const draftOrderId = draftOrder?.draft_order?.id;
-
-    if (!draftOrderId) {
-      return res.status(500).json({ error: 'Draft order created but ID missing' });
+    const json = await createResp.json();
+    const draftOrder = json?.draft_order;
+    if (!draftOrder?.id) {
+      return res.status(502).json({ error: 'Draft order created, but response was missing an ID' });
     }
 
-    // Draft order checkout URL
-    const checkoutUrl = `https://${SHOP_DOMAIN}/admin/draft_orders/${draftOrderId}/checkout`;
+    const draftOrderId = draftOrder.id;
+    const checkoutUrl =
+      draftOrder.invoice_url ||
+      `https://${SHOP_DOMAIN}/draft_orders/${draftOrderId}/checkout`;
 
     return res.status(200).json({
       success: true,
       draftOrderId,
       checkoutUrl,
-      message: 'Draft order created successfully',
+      message: 'Draft order created successfully'
     });
   } catch (error) {
-    console.error('Error creating draft order:', error);
+    console.error('Draft order API error:', error);
     return res.status(500).json({
       error: 'Internal server error',
-      message: error?.message || 'Unknown error',
+      message: error?.message || 'Unknown error'
     });
   }
 };
